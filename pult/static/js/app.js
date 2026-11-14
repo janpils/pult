@@ -1,5 +1,5 @@
 // Pult: hlavní modul (spojení se serverem, navigace, pás položek, zkratky, lidé na pultu).
-const VERSION = "2.10.11";
+const VERSION = "2.11.0";
 import { $, $$, S, store, api, dialog, clientId, clock, esc, icon, on, emit, toast, ago, plural, initials, isTouch, anyDialog, dialogs, closeMenu, menu, fmtTC, dbg } from "./core.js";
 import * as P from "./player.js";
 import * as D from "./draw.js";
@@ -284,6 +284,7 @@ function renderStrip() {
       ${!ready && it.state !== "error" ? `<span class="pbar"><i style="width:${Math.round((it.progress || 0) * 100)}%"></i></span>` : ""}</button>`;
   }).join("");
   markStrip();
+  markSel();
 }
 function markStrip() {
   if (!S.batch) return;
@@ -297,7 +298,53 @@ function markStrip() {
     $(".dots", el).innerHTML = (draw.has(n) ? "<i></i>" : "") + (com.has(n) ? '<i class="c"></i>' : "");
   });
 }
-$("#strip").addEventListener("click", (e) => { const el = e.target.closest(".st"); if (el) goTo(+el.dataset.n); });
+// výběr jako ve Finderu: ⌘ přidá nebo odebere, Shift vybere rozsah, ⌘C zkopíruje soubory (pak ⌘V ve Zprávách)
+const sel = { set: new Set(), anchor: 0 };
+const selected = () => S.batch ? S.batch.items.filter((it) => sel.set.has(it.n)) : [];
+function markSel() {
+  const multi = sel.set.size > 1;
+  $$("#strip .st").forEach((el) => el.classList.toggle("sel", multi && sel.set.has(+el.dataset.n)));
+}
+function clearSel() { sel.set.clear(); sel.anchor = S.n || 0; markSel(); }
+$("#strip").addEventListener("click", (e) => {
+  const el = e.target.closest(".st");
+  if (!el) return;
+  const n = +el.dataset.n, ns = S.batch.items.map((it) => it.n);
+  if (e.metaKey || e.ctrlKey) {
+    if (!sel.set.size && S.n) sel.set.add(S.n);
+    if (sel.set.has(n)) sel.set.delete(n); else sel.set.add(n);
+    sel.anchor = n;
+    markSel();
+    return;
+  }
+  if (e.shiftKey) {
+    const a = Math.max(0, ns.indexOf(sel.anchor || S.n)), b = ns.indexOf(n);
+    sel.set = new Set(ns.slice(Math.min(a, b), Math.max(a, b) + 1));
+    markSel();
+    return;
+  }
+  sel.set = new Set([n]);
+  sel.anchor = n;
+  markSel();
+  goTo(n);
+});
+async function copySelected() {
+  if (!S.batch) return;
+  let items = selected().filter((it) => it.state === "ready");
+  if (!items.length) items = [P.item()].filter((it) => it && it.state === "ready");
+  if (!items.length) return;
+  if (!S.local) return toast("Kopírovat soubory jde jen na Macu, kde Pult běží. Tady je přetáhni nebo stáhni.");
+  const r = await api("POST", "/api/copy-file", { id: S.batch.id, ns: items.map((it) => it.n) }).catch(() => null);
+  const cnt = (r && r.count) || items.length;
+  if (!r || !r.ok) return toast("Kopírování se nepovedlo");
+  toast(cnt === 1 ? "Zkopírováno. Ve Zprávách dej ⌘V" : `Zkopírováno ${cnt} ${cnt < 5 ? "soubory" : "souborů"}. Ve Zprávách dej ⌘V`);
+}
+function selectAll() {
+  if (!S.batch) return;
+  sel.set = new Set(S.batch.items.map((it) => it.n));
+  markSel();
+  toast(`Vybráno ${sel.set.size} (⌘C zkopíruje)`, { ms: 1400 });
+}
 on("strip", markStrip);
 
 // ---------- živé zprávy ze serveru ----------
@@ -559,6 +606,7 @@ document.addEventListener("keydown", (e) => {
     if (closeMenu()) return;
     if (dialogs.length) { dialogs[dialogs.length - 1](); return; }
     if (S.kino) { P.setKino(false); return; }
+    if (sel.set.size > 1) { clearSel(); return; }
     if (!wide()) app.classList.remove("drawer-side", "drawer-notes");
     return;
   }
@@ -569,6 +617,8 @@ document.addEventListener("keydown", (e) => {
   if (Side.keydown(e)) return;
   if (mod && k.toLowerCase() === "z") { e.preventDefault(); e.shiftKey ? D.redo() : D.undo(); return; }
   if (mod && k === "Enter") { e.preventDefault(); N.submit(); return; }
+  if (mod && !e.shiftKey && c === "KeyC" && !String(getSelection() || "")) { e.preventDefault(); copySelected(); return; }
+  if (mod && !e.shiftKey && c === "KeyA") { e.preventDefault(); selectAll(); return; }
   if (mod && (c === "Digit0" || c === "Equal" || c === "Minus" || k === "+" || k === "-")) {
     e.preventDefault();
     const r = $("#viewport").getBoundingClientRect();
@@ -633,3 +683,11 @@ if ("serviceWorker" in navigator && (location.hostname === "localhost" || locati
 }
 dbg("load", VERSION, innerWidth + "x" + innerHeight, isTouch);
 connect();
+
+// Nativní Pult.app: ⌘C může vzít menu Úpravy › Kopírovat a místo keydown přijde jen událost copy
+document.addEventListener("copy", (e) => {
+  const t = e.target, tag = t && t.tagName;
+  if (tag === "INPUT" || tag === "TEXTAREA" || (t && t.isContentEditable) || String(getSelection() || "")) return;
+  e.preventDefault();
+  copySelected();
+});

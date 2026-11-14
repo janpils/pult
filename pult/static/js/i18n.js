@@ -94,6 +94,8 @@ const EN = {
   // diktování
   "Diktovat": "Dictate", "Diktuji": "Dictating", "Přepisuji…": "Transcribing…", "Diktovat připomínky mikrofonem (D)": "Dictate notes with the microphone (D)",
   "Diktuji · vypnout (D)": "Dictating · turn off (D)", "Vypnout diktování (D)": "Turn off dictation (D)", "Dokončuji přepis diktátu…": "Finishing transcription…",
+  "Zkopírováno. Ve Zprávách dej ⌘V": "Copied. Paste with ⌘V in Messages", "Kopírování se nepovedlo": "Copying failed",
+  "Kopírovat soubory jde jen na Macu, kde Pult běží. Tady je přetáhni nebo stáhni.": "Copying files only works on the Mac running Pult. Drag or download them here.",
   "Přepis diktátu se nepovedl (síť nebo ElevenLabs). Zkouším to znovu, nic se neztratí.": "Transcription failed (network or ElevenLabs). Retrying, nothing is lost.",
   "V diktátu jsem nerozpoznal žádná slova.": "No words were recognized in the dictation.",
   "Diktování není připravené. Řekni Claudovi „zapni v Pultu diktování“.": "Dictation isn't set up. Ask Claude to “turn on dictation in Pult”.",
@@ -215,6 +217,8 @@ const EN = {
 
 // texty s čísly a jmény (celý textový uzel)
 const RX = [
+  [/^Zkopírováno (\d+) (soubory|souborů)\. Ve Zprávách dej ⌘V$/, (m, a) => `Copied ${a} files. Paste with ⌘V in Messages`],
+  [/^Vybráno (\d+) \(⌘C zkopíruje\)$/, (m, a) => `${a} selected (⌘C copies)`],
   [/^Claude odklidil „(.+?)“(: .+)?$/, (m, a, b) => `Claude cleared “${a}”${b || ""}`],
   [/^Diktuju do mikrofonu (.+), ne do sluchátek: AirPods by jinak přepnuly do režimu hovoru a hrály roboticky\. Změníš v Nastavení › Diktování\.$/, "Dictating into $1, not the headphones: AirPods would otherwise switch to call mode and sound robotic. Change it in Settings › Dictation."],
   [/^(.+) \(sluchátka, zvuk bude jako při hovoru\)$/, "$1 (headphones, sound will be like a call)"], [/^Mikrofon (\d+)$/, "Microphone $1"],

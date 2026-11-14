@@ -539,3 +539,5 @@ select.inp { padding-right: 6px; }
 a.btn, a.btn:visited { color: var(--text); text-decoration: none; }
 a.btn.primary, a.btn.primary:visited { color: var(--on-accent); }
 .dset a, .dset a:visited { color: var(--text); }
+.st.sel { border-color: var(--text); }
+.st.sel.on { border-color: var(--accent); }

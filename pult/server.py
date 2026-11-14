@@ -600,8 +600,9 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/copy-file":  # soubor do schránky jako ve Finderu: pak ⌘V do Zpráv nebo Mailu
                 if not self.need_local():
                     return
-                p, _ = item_file(str(body.get("id")), int(body.get("n") or 0))
-                return self.send_json({"ok": bool(p) and copy_file(p)})
+                ns = body.get("ns") or [body.get("n")]
+                paths = [p for p in (item_file(str(body.get("id")), int(n or 0))[0] for n in ns[:200]) if p]
+                return self.send_json({"ok": bool(paths) and copy_files(paths), "count": len(paths)})
             if path == "/api/trash/empty":
                 if not self.need_local():
                     return
@@ -940,6 +941,47 @@ def item_file(bid, n):
     return None, None
 
 
+def copy_helper():
+    """Malý Swift pomocník pro víc souborů ve schránce (osascript umí jen jeden). Přeloží se jednou do configu."""
+    src = os.path.join(os.path.dirname(os.path.abspath(__file__)), "macapp", "copyfiles.swift")
+    exe = os.path.join(config.config_dir(), "bin", "pult-copyfiles")
+    try:
+        if os.path.exists(exe) and os.path.getmtime(exe) >= os.path.getmtime(src):
+            return exe
+        os.makedirs(os.path.dirname(exe), exist_ok=True)
+        r = subprocess.run(["xcrun", "swiftc", "-O", src, "-o", exe + ".tmp"], capture_output=True, text=True, timeout=300)
+        if r.returncode == 0:
+            os.replace(exe + ".tmp", exe)
+            return exe
+        log("Kopírování souborů: pomocník se nepřeložil:", (r.stderr or "").strip()[-300:])
+    except (OSError, subprocess.SubprocessError) as e:
+        log("Kopírování souborů: pomocník chybí:", e)
+    return None
+
+
+def copy_files(paths):
+    """Soubory do systémové schránky (jako ⌘C ve Finderu)."""
+    if config.IS_MAC:
+        exe = copy_helper()
+        if exe:
+            try:
+                r = subprocess.run([exe] + list(paths), capture_output=True, text=True, timeout=15)
+                if r.returncode == 0 and "ok" in r.stdout:
+                    return True
+            except (OSError, subprocess.SubprocessError):
+                pass
+        if len(paths) > 1:
+            return False
+    if config.IS_WIN:
+        try:
+            r = subprocess.run(["powershell", "-NoProfile", "-Command", "Set-Clipboard -LiteralPath $args"] + list(paths),
+                               capture_output=True, timeout=15, creationflags=library.NO_WINDOW)
+            return r.returncode == 0
+        except (OSError, subprocess.SubprocessError):
+            return False
+    return copy_file(paths[0])
+
+
 def copy_file(path):
     """Soubor do systémové schránky (jako ⌘C ve Finderu)."""
     try:
@@ -1151,6 +1193,8 @@ def main():
     threading.Thread(target=housekeeping, daemon=True).start()
     library.requeue_unfinished()
     dictation.start(broadcast)
+    if config.IS_MAC:
+        threading.Thread(target=copy_helper, daemon=True).start()  # ať je ⌘C hned připravené
     if not config.tool("ffmpeg"):
         log("Upozornění: ffmpeg nenalezen, videa se nepřipraví (pult doctor).")
     good = None
