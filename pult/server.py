@@ -432,7 +432,7 @@ class Handler(BaseHTTPRequestHandler):
                 d = library.batch_dir(bid)
                 p = os.path.normpath(os.path.join(d, rel))
                 sub = os.path.relpath(p, d).split(os.sep)[0] if p.startswith(d + os.sep) else ""
-                if sub in ("media", "thumb", "src") and os.path.isfile(p) and not os.path.islink(p):
+                if sub in ("media", "thumb", "src", "att") and os.path.isfile(p) and not os.path.islink(p):
                     return self.send_file(p, "private, max-age=600", head)
                 return self.send_json({"error": "nenalezeno"}, 404)
             m = re.match(r"/api/ai-meta/([^/]+)/(\d+)$", path)
@@ -684,11 +684,15 @@ class Handler(BaseHTTPRequestHandler):
         """Nahrání souboru z prohlížeče: tělo požadavku se rovnou zapisuje na disk (i velká videa)."""
         d = library.batch_dir(bid)
         name = library.safe_name(unquote(self.query().get("name") or "soubor"))
+        att = self.query().get("att") == "1"  # příloha ke komentáři (obrázek nebo video z Finderu či schránky)
         if not library.kind_of(name):
             raise ValueError("Tenhle typ souboru Pult neumí: %s" % name)
+        if not os.path.isfile(os.path.join(d, "batch.json")):
+            raise FileNotFoundError(bid)
         n = int(self.headers.get("Content-Length") or 0)
-        os.makedirs(os.path.join(d, "src"), exist_ok=True)
-        rel = "src/%s_%s" % (library.uuid.uuid4().hex[:6], name)
+        folder = "att" if att else "src"
+        os.makedirs(os.path.join(d, folder), exist_ok=True)
+        rel = "%s/%s_%s" % (folder, library.uuid.uuid4().hex[:6], name)
         dst = os.path.join(d, rel)
         left = n
         with open(dst + ".part", "wb") as f:

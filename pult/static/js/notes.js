@@ -1,7 +1,7 @@
 // Pult: připomínky (komentáře ke snímku nebo položce, kresby, verdikty), fronta změn odolná proti
 // výpadku sítě a odeslání revize Claudovi.
 import { $, $$, S, store, api, clientId, uid, esc, icon, emit, on, toast, ago, plural, initials, fmtTC, confirmBox } from "./core.js";
-import { vid, item, isVideo, fps, curFrame, seekFrame, pause, drawMarks } from "./player.js";
+import { vid, item, isVideo, fps, curFrame, seekFrame, pause, drawMarks, media } from "./player.js";
 import * as Dict from "./dictate.js";
 import { renderOverlay, releaseOverlay, clearAt } from "./draw.js";
 
@@ -161,7 +161,7 @@ export function render() {
         <span class="ord" title="Pořadí, v jakém připomínka vznikla">${order.get(e.id) || ""}</span>
         <span class="av" style="--c:${esc(e.byc || "#666")}">${esc(initials(e.by))}</span>
         <div><div class="who"><b>${esc(e.by || "?")}</b>${f ? `<span class="at">${f}</span>` : ""}${e.src === "dict" ? `<span class="dict" title="Nadiktováno mikrofonem">${icon("mic")}</span>` : ""}<span class="ago">${esc(ago(e.at))}${e.edited ? " · upraveno" : ""}</span></div>
-        <div class="txt">${esc(e.text)}</div></div>
+        ${e.text ? `<div class="txt">${esc(e.text)}</div>` : ""}${attHtml(e.att)}</div>
         <div class="acts"><button data-act="resolve" title="${e.resolved ? "Znovu otevřít" : "Vyřešeno"}">${icon("check")}</button>${mine ? `<button data-act="edit" title="Upravit">${icon("pen")}</button>` : ""}<button data-act="del-c" title="Smazat">${icon("trash")}</button></div></div>`;
     }
   }
@@ -186,19 +186,41 @@ $("#noteList").addEventListener("click", async (e) => {
   if (act === "resolve") { const c = S.notes.comments[el.dataset.id]; if (c) change({ op: "comment.set", comment: { id: c.id, resolved: !c.resolved } }); return; }
   if (act === "del-c") { change({ op: "comment.del", id: el.dataset.id }); toast("Komentář smazán", { ms: 2000 }); return; }
   if (act === "edit") return editComment(el);
+  if (act === "att") { const c = S.notes.comments[el.dataset.id], a = c && c.att && c.att[+e.target.closest("[data-act]").dataset.i]; if (a) viewAtt(a); return; }
   if (act === "del-d") { clearAt(n, frame); return; }
   if (el.querySelector("textarea")) return;
   emit("goto", { n, frame });
 });
 
+function attHtml(att) {
+  if (!att || !att.length) return "";
+  return `<div class="atts">${att.map((a, i) => {
+    const inner = a.kind === "image" && /\.(jpe?g|png|gif|webp|avif)$/i.test(a.path) ? `<img loading="lazy" src="${media(a.path)}" alt="">`
+      : a.kind === "video" ? `<video muted preload="metadata" src="${media(a.path)}#t=0.1"></video><span class="play">${icon("play")}</span>` : icon("image");
+    return `<button data-act="att" data-i="${i}" title="${esc(a.name)}">${inner}</button>`;
+  }).join("")}</div>`;
+}
+function viewAtt(a) {
+  const box = document.createElement("div");
+  box.className = "att-view";
+  box.innerHTML = (a.kind === "video" ? `<video src="${media(a.path)}" controls autoplay playsinline></video>` : `<img src="${media(a.path)}" alt="">`)
+    + `<button class="ib x" title="Zavřít (Esc)">${icon("x")}</button>`;
+  const close = () => { box.remove(); removeEventListener("keydown", onKey, true); };
+  const onKey = (ev) => { if (ev.key === "Escape") { ev.stopPropagation(); ev.preventDefault(); close(); } };
+  box.onclick = (ev) => { if (ev.target === box || ev.target.closest(".x")) close(); };
+  addEventListener("keydown", onKey, true);
+  document.body.appendChild(box);
+}
+
 function editComment(el) {
   const c = S.notes.comments[el.dataset.id];
   if (!c) return;
-  const box = el.querySelector(".txt");
+  let box = el.querySelector(".txt");
+  if (!box) { box = document.createElement("div"); box.className = "txt"; el.querySelector(".who").after(box); }
   box.innerHTML = `<textarea rows="3"></textarea>`;
   const ta = box.querySelector("textarea");
   ta.value = c.text; ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length);
-  const save = () => { const t = ta.value.trim(); if (t && t !== c.text) change({ op: "comment.set", comment: { id: c.id, text: t } }); else render(); };
+  const save = () => { const t = ta.value.trim(); if ((t || (c.att && c.att.length)) && t !== c.text) change({ op: "comment.set", comment: { id: c.id, text: t } }); else render(); };
   ta.onkeydown = (ev) => { ev.stopPropagation(); if (ev.key === "Enter" && !ev.shiftKey) { ev.preventDefault(); save(); } if (ev.key === "Escape") render(); };
   ta.onblur = save;
 }
@@ -230,12 +252,87 @@ export function focusComposer() {
   input.focus();
   requestAnimationFrame(() => input.focus());
 }
-function send() {
+// ---------- přílohy (přetažení na panel, ⌘V, sponka) ----------
+const pend = [];  // {id, file, name, kind, url, path, progress, error, promise}
+const ATT_OK = /\.(jpe?g|png|gif|webp|avif|heic|heif|tiff?|bmp|mp4|mov|m4v|webm|mkv|avi)$/i;
+function fileName(f) {
+  if (f.name && f.name !== "image.png" && ATT_OK.test(f.name)) return f.name;
+  const ext = (f.type.split("/")[1] || "png").replace("quicktime", "mov").replace("jpeg", "jpg");
+  return `schranka_${new Date().toISOString().slice(0, 19).replace(/[-:T]/g, "")}.${ext}`;
+}
+export function addAttachments(files) {
+  if (!S.batch || !item()) return;
+  const ok = [...files].filter((f) => /^(image|video)\//.test(f.type) || ATT_OK.test(f.name || ""));
+  if (!ok.length) return toast("Přiložit jde jen obrázek nebo video.");
+  for (const f of ok) {
+    const a = { id: uid(), file: f, name: fileName(f), kind: /^video\//.test(f.type) || /\.(mp4|mov|m4v|webm|mkv|avi)$/i.test(f.name || "") ? "video" : "image", progress: 0 };
+    try { a.url = URL.createObjectURL(f); } catch {}
+    a.promise = uploadAtt(S.batch.id, a);
+    pend.push(a);
+  }
+  renderPending();
+  focusComposer();
+}
+function uploadAtt(bid, a) {
+  return new Promise((res) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("PUT", `/api/upload/${encodeURIComponent(bid)}?att=1&name=${encodeURIComponent(a.name)}`);
+    xhr.upload.onprogress = (e) => { a.progress = e.total ? e.loaded / e.total : 0; renderPending(); };
+    xhr.onload = () => { let j = {}; try { j = JSON.parse(xhr.responseText); } catch {}
+      if (xhr.status < 300 && j.path) { a.path = j.path; a.progress = 1; } else { a.error = j.error || String(xhr.status); toast("Přílohu se nepodařilo nahrát: " + a.error, { error: true }); }
+      renderPending(); res(); };
+    xhr.onerror = () => { a.error = "spojení přerušeno"; renderPending(); res(); };
+    xhr.send(a.file);
+  });
+}
+function renderPending() {
+  const box = $("#attPending");
+  box.hidden = !pend.length;
+  box.innerHTML = pend.map((a) => `<div class="att-chip${a.error ? " err" : ""}" data-id="${a.id}" title="${esc(a.name)}">`
+    + (a.url && a.kind === "image" && !/\.(heic|heif|tiff?|bmp)$/i.test(a.name) ? `<img src="${a.url}" alt="">` : a.url && a.kind === "video" ? `<video muted src="${a.url}#t=0.1"></video>` : `<span class="nm">${esc(a.name)}</span>`)
+    + `<button class="x" title="Odebrat">${icon("x")}</button>`
+    + (a.path || a.error ? "" : `<span class="up"><i style="width:${Math.round(a.progress * 100)}%"></i></span>`) + `</div>`).join("");
+}
+$("#attPending").addEventListener("click", (e) => {
+  const x = e.target.closest(".x"), chip = e.target.closest(".att-chip");
+  if (!x || !chip) return;
+  const i = pend.findIndex((a) => a.id === chip.dataset.id);
+  if (i >= 0) { const [a] = pend.splice(i, 1); if (a.url) URL.revokeObjectURL(a.url); }
+  renderPending();
+});
+function clearPending() { for (const a of pend) if (a.url) setTimeout(() => URL.revokeObjectURL(a.url), 60000); pend.length = 0; renderPending(); }
+on("batch-left", clearPending);
+on("attach-files", addAttachments);
+$("#attachBtn").onclick = () => $("#attInput").click();
+$("#attInput").onchange = (e) => { const f = [...e.target.files]; e.target.value = ""; if (f.length) addAttachments(f); };
+// ⌘V obrázku nebo videa (snímek obrazovky, soubor z Finderu) do komentáře; text se vloží normálně
+document.addEventListener("paste", (e) => {
+  const files = [...((e.clipboardData && e.clipboardData.files) || [])];
+  if (!files.length || !S.batch) return;
+  const t = e.target, tag = t && t.tagName;
+  if ((tag === "INPUT" || tag === "TEXTAREA") && t !== input) return;
+  if (document.querySelector("dialog[open]")) return;
+  e.preventDefault();
+  addAttachments(files);
+});
+
+let sending = false;
+async function send() {
   const text = input.value.trim(), it = item();
-  if (!text || !it) return;
+  if ((!text && !pend.length) || !it || sending) return;
   if (!S.me.name) { emit("need-name"); return; }
   const frame = it.kind === "video" && !S.anchorWhole ? curFrame() : null;
-  change({ op: "comment.set", comment: { id: uid(), n: S.n, frame, text, by: S.me.name, byc: S.me.color } });
+  const n = S.n, bid = S.batch.id;
+  let att = [];
+  if (pend.length) {
+    sending = true; $("#sendBtn").disabled = true;
+    try { await Promise.all(pend.map((a) => a.promise)); } finally { sending = false; $("#sendBtn").disabled = false; }
+    if (!S.batch || S.batch.id !== bid) return;
+    att = pend.filter((a) => a.path).map((a) => ({ path: a.path, name: a.name, kind: a.kind }));
+    if (!text && !att.length) return toast("Přílohy se nenahrály, zkus to znovu.", { error: true });
+    clearPending();
+  }
+  change({ op: "comment.set", comment: { id: uid(), n, frame, text, by: S.me.name, byc: S.me.color, ...(att.length ? { att } : {}) } });
   input.value = ""; input.style.height = "auto";
   S.anchorWhole = false; updateAnchor();
 }

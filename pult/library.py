@@ -775,12 +775,30 @@ def clean_stroke(s):
             "byc": str(s.get("byc") or "")[:16], "at": now_iso()}
 
 
-def clean_comment(c, old=None):
+def clean_atts(atts, d):
+    """Přílohy komentáře: jen soubory nahrané do att/ této dávky."""
+    out = []
+    for a in (atts or [])[:20]:
+        if not isinstance(a, dict):
+            continue
+        rel = str(a.get("path") or "")
+        p = os.path.normpath(os.path.join(d, rel))
+        if not rel.startswith("att/") or not p.startswith(os.path.join(d, "att") + os.sep) or not os.path.isfile(p):
+            continue
+        out.append({"path": rel, "name": str(a.get("name") or os.path.basename(rel))[:120], "kind": kind_of(rel) or "file"})
+    return out
+
+
+def clean_comment(c, old=None, d=None):
     if not isinstance(c, dict) or not safe_id(str(c.get("id", ""))):
         raise ValueError("neplatný komentář")
     base = dict(old or {})
     if "text" in c:
         base["text"] = str(c["text"] or "").strip()[:5000]
+    if "att" in c and d:
+        base["att"] = clean_atts(c["att"], d)
+        if not base["att"]:
+            base.pop("att")
     if not old:
         base.update(id=c["id"], n=int(c["n"]), frame=None if c.get("frame") is None else max(0, int(c["frame"])),
                     by=str(c.get("by") or "")[:60], byc=str(c.get("byc") or "")[:16], at=now_iso(), resolved=False)
@@ -789,7 +807,8 @@ def clean_comment(c, old=None):
     if "resolved" in c:
         base["resolved"] = bool(c["resolved"])
     base["edited"] = now_iso() if old else None
-    if not base.get("text"):
+    base.setdefault("text", "")
+    if not base.get("text") and not base.get("att"):
         raise ValueError("prázdný komentář")
     return base
 
@@ -811,7 +830,7 @@ def apply_op(bid, op):
                 nt["strokes"].pop(i, None)
         elif kind == "comment.set":
             c = op.get("comment") or {}
-            out["comment"] = clean_comment(c, nt["comments"].get(c.get("id")))
+            out["comment"] = clean_comment(c, nt["comments"].get(c.get("id")), d)
             nt["comments"][out["comment"]["id"]] = out["comment"]
         elif kind == "comment.del":
             out["id"] = str(op.get("id") or "")
@@ -872,6 +891,22 @@ def composite(item, media, frame, overlay_png, out):
     return r.returncode == 0
 
 
+def copy_atts(d, folder, n, c):
+    """Přílohy komentáře do složky revize, ať je Claude otevře jako obyčejné soubory."""
+    out = []
+    for i, a in enumerate(c.get("att") or [], 1):
+        src = os.path.join(d, a.get("path") or "")
+        if not os.path.isfile(src):
+            continue
+        name = "priloha_%02d_%s_%d_%s" % (n, c["id"][:6], i, os.path.basename(src).split("_", 1)[-1])
+        try:
+            shutil.copy2(src, os.path.join(folder, name))
+            out.append(name)
+        except OSError:
+            pass
+    return out
+
+
 def submit(bid, overlays, by):
     """Hotovo: složka revize/<čas>__<dávka> s revize.md (pro Clauda), revize.json a obrázky."""
     d = batch_dir(bid)
@@ -919,7 +954,7 @@ def submit(bid, overlays, by):
                          "tc": tc(t, fps) if t is not None else None, "image": img_name,
                          "drawings": len(g["strokes"]), "authors": authors,
                          "comments": [{"order": order.get(c["id"]), "text": c["text"], "by": c.get("by"), "resolved": c.get("resolved", False),
-                                       "dictated": c.get("src") == "dict"}
+                                       "dictated": c.get("src") == "dict", "attachments": copy_atts(d, folder, n, c)}
                                       for c in sorted(g["comments"], key=lambda c: c.get("at", ""))],
                          "changed": any((x.get("at") or "") > prev for x in g["strokes"] + g["comments"])})
         shutil.rmtree(tmpdir, ignore_errors=True)
@@ -952,7 +987,8 @@ def review_md(rev):
              "- Číslo v hranaté závorce u komentáře = pořadí, v jakém vznikal (u každé položky zvlášť). Revizor video pouští víckrát,"
              " takže pozdější číslo u dřívějšího času znamená, že se k místu vrátil.",
              "- Časy jsou `mm:ss:ff` (minuty:sekundy:snímek v rámci vteřiny) a v sekundách; snímek = pořadí od 0.",
-             "- Obrázky ukazují přesný snímek i s kresbou. Když nic neschválili ani nenapsali, platí, že je položka v pořádku."]
+             "- Obrázky ukazují přesný snímek i s kresbou. Když nic neschválili ani nenapsali, platí, že je položka v pořádku.",
+             "- Přílohy (`priloha_…`) jsou obrázky a videa, které revizor ke komentáři přidal (reference, ukázka). Jsou v téhle složce, podívej se na ně."]
     o = rev.get("origin") or {}
     if o.get("host_session") or o.get("session"):
         lines.append("- Dávku poslal chat `%s`%s." % (o.get("host_session") or o.get("session"),
@@ -984,8 +1020,10 @@ def review_md(rev):
                 head += " · beze změny od minulé revize"
             lines.append(head)
             for c in r["comments"]:
-                lines.append("  - %s%s%s%s: %s" % ("[%d] " % c["order"] if c.get("order") else "", c.get("by") or "?", " (nadiktováno, přepis může mít chyby)" if c.get("dictated") else "",
-                                                 " (vyřešeno)" if c.get("resolved") else "", c["text"].replace("\n", " ")))
+                att = c.get("attachments") or []
+                lines.append("  - %s%s%s%s: %s%s" % ("[%d] " % c["order"] if c.get("order") else "", c.get("by") or "?", " (nadiktováno, přepis může mít chyby)" if c.get("dictated") else "",
+                                                   " (vyřešeno)" if c.get("resolved") else "", c["text"].replace("\n", " ") or "(bez textu)",
+                                                   (" · příloh%s: %s" % ("a" if len(att) == 1 else "y", ", ".join("`%s`" % x for x in att))) if att else ""))
         lines.append("")
     if not notes and not any(it.get("verdict") for it in rev["items"]):
         lines.append("Bez připomínek: dávka prošla a je schválená.")

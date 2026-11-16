@@ -238,12 +238,22 @@ $("#fileInput").onchange = (e) => { const files = [...e.target.files]; e.target.
 // přetažení souborů a složek odkudkoli do okna
 let dragDepth = 0;
 const hasFiles = (e) => e.dataTransfer && [...e.dataTransfer.types].includes("Files");
-addEventListener("dragenter", (e) => { if (!hasFiles(e)) return; e.preventDefault(); dragDepth++; $("#drop").hidden = false; });
-addEventListener("dragover", (e) => { if (hasFiles(e)) { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; } });
-addEventListener("dragleave", (e) => { if (!hasFiles(e)) return; dragDepth = Math.max(0, dragDepth - 1); if (!dragDepth) $("#drop").hidden = true; });
+// nad panelem připomínek (u otevřené položky) se soubor přiloží ke komentáři
+const overNotes = (e) => {
+  const n = $("#notes");
+  if (!S.batch || !n || getComputedStyle(n).display === "none" || getComputedStyle(n).visibility === "hidden") return false;  // panel bývá position: fixed, offsetParent nepomůže
+  const r = n.getBoundingClientRect();
+  return r.width > 0 && e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
+};
+const dropMode = (e) => { const on = overNotes(e); $("#notes").classList.toggle("dropping", on); $("#drop").hidden = on || !dragDepth; };
+addEventListener("dragenter", (e) => { if (!hasFiles(e)) return; e.preventDefault(); dragDepth++; dropMode(e); });
+addEventListener("dragover", (e) => { if (hasFiles(e)) { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; dropMode(e); } });
+addEventListener("dragleave", (e) => { if (!hasFiles(e)) return; dragDepth = Math.max(0, dragDepth - 1); if (!dragDepth) { $("#drop").hidden = true; $("#notes").classList.remove("dropping"); } });
 addEventListener("drop", async (e) => {
   if (!hasFiles(e)) return;
-  e.preventDefault(); dragDepth = 0; $("#drop").hidden = true;
+  const toNotes = overNotes(e);
+  e.preventDefault(); dragDepth = 0; $("#drop").hidden = true; $("#notes").classList.remove("dropping");
+  if (toNotes) { emit("attach-files", [...e.dataTransfer.files]); return; }
   const entries = [...e.dataTransfer.items].map((i) => i.webkitGetAsEntry && i.webkitGetAsEntry()).filter(Boolean);
   let files = [], title = "";
   if (entries.length) {

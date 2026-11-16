@@ -61,6 +61,7 @@
     <symbol id="i-install" viewBox="0 0 24 24"><path d="M12 3.5v11"/><path d="M7.5 10L12 14.5 16.5 10"/><rect x="4" y="17" width="16" height="3.5" rx="1.2"/></symbol>
     <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3"/><path d="M19.5 4.5v4.5H15"/></symbol>
     <symbol id="i-image" viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="2.2"/><circle cx="9" cy="10" r="1.8"/><path d="M20.5 16l-5-5L6 19.5"/></symbol>
+    <symbol id="i-clip" viewBox="0 0 24 24"><path d="M20 11.5l-7.8 7.8a5 5 0 0 1-7.1-7.1l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4l7.8-7.8"/></symbol>
     <symbol id="i-film" viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="2.2"/><path d="M7.5 4.5v15M16.5 4.5v15M3.5 9h4M3.5 15h4M16.5 9h4M16.5 15h4"/></symbol>
     <symbol id="i-spark" viewBox="0 0 24 24"><path d="M12 3.5l1.9 5.4 5.6 2-5.6 2L12 18.5l-1.9-5.6-5.6-2 5.6-2z" fill="currentColor" stroke="none"/><path d="M18.5 15.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7z" fill="currentColor" stroke="none"/></symbol>
     <symbol id="i-share" viewBox="0 0 24 24"><path d="M12 3.5v11"/><path d="M8 7.5l4-4 4 4"/><path d="M8.5 10.5H7a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6a2 2 0 0 0-2-2h-1.5"/></symbol>
@@ -199,7 +200,10 @@
     <div id="noteList" class="note-list"></div>
     <div class="composer">
       <div class="anchor"><button id="anchorBtn" class="anchor-btn" title="Ke kterému místu se komentář váže"></button></div>
+      <div id="attPending" class="att-pending" hidden></div>
       <div class="compose-row">
+        <button id="attachBtn" class="ib" title="Přiložit obrázek nebo video (nebo ho sem přetáhni či vlož ⌘V)"><svg class="i"><use href="#i-clip"/></svg></button>
+        <input id="attInput" type="file" accept="image/*,video/*" multiple hidden>
         <textarea id="commentInput" rows="1" placeholder="Napiš připomínku… (C)"></textarea>
         <button id="sendBtn" class="ib accent" title="Přidat (Enter)"><svg class="i"><use href="#i-send"/></svg></button>
       </div>

@@ -94,6 +94,9 @@ const EN = {
   // diktování
   "Diktovat": "Dictate", "Diktuji": "Dictating", "Přepisuji…": "Transcribing…", "Diktovat připomínky mikrofonem (D)": "Dictate notes with the microphone (D)",
   "Diktuji · vypnout (D)": "Dictating · turn off (D)", "Vypnout diktování (D)": "Turn off dictation (D)", "Dokončuji přepis diktátu…": "Finishing transcription…",
+  "Přiložit obrázek nebo video (nebo ho sem přetáhni či vlož ⌘V)": "Attach an image or video (or drag it here or paste with ⌘V)",
+  "Přiložit jde jen obrázek nebo video.": "You can only attach images or videos.", "Přílohy se nenahrály, zkus to znovu.": "The attachments didn't upload, try again.",
+  "Odebrat": "Remove",
   "Zkopírováno. Ve Zprávách dej ⌘V": "Copied. Paste with ⌘V in Messages", "Kopírování se nepovedlo": "Copying failed",
   "Kopírovat soubory jde jen na Macu, kde Pult běží. Tady je přetáhni nebo stáhni.": "Copying files only works on the Mac running Pult. Drag or download them here.",
   "Přepis diktátu se nepovedl (síť nebo ElevenLabs). Zkouším to znovu, nic se neztratí.": "Transcription failed (network or ElevenLabs). Retrying, nothing is lost.",
@@ -217,6 +220,7 @@ const EN = {
 
 // texty s čísly a jmény (celý textový uzel)
 const RX = [
+  [/^Přílohu se nepodařilo nahrát: (.*)$/, (m, a) => `Couldn't upload the attachment: ${a}`],
   [/^Zkopírováno (\d+) (soubory|souborů)\. Ve Zprávách dej ⌘V$/, (m, a) => `Copied ${a} files. Paste with ⌘V in Messages`],
   [/^Vybráno (\d+) \(⌘C zkopíruje\)$/, (m, a) => `${a} selected (⌘C copies)`],
   [/^Claude odklidil „(.+?)“(: .+)?$/, (m, a, b) => `Claude cleared “${a}”${b || ""}`],
